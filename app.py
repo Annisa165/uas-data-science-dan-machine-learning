@@ -1,7 +1,8 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
 import pickle
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 
 # ─────────────────────────────────────────
 # CONFIG
@@ -11,6 +12,26 @@ st.set_page_config(
     page_icon="🎓",
     layout="centered"
 )
+
+BASE_DIR = Path(__file__).resolve().parent
+
+# Fitur asli yang dipakai model saat training
+FEATURES = [
+    "Study_Hours_Per_Day",
+    "Sleep_Hours_Per_Day",
+    "Attendance_Percentage",
+    "Extracurricular_Activities",
+    "Screen_Time_Per_Day",
+    "Nutrition_Quality",
+    "Stress_Level",
+    "Digital_Tools_Usage",
+    "Assignments_On_Time",
+]
+
+# Mapping manual agar input kategori berubah jadi angka
+EXTRACURRICULAR_MAP = {"No": 0, "Yes": 1}
+NUTRITION_MAP = {"Poor": 0, "Average": 1, "Good": 2}
+DIGITAL_TOOLS_MAP = {"Low": 0, "Medium": 1, "High": 2}
 
 # ─────────────────────────────────────────
 # CUSTOM CSS
@@ -27,8 +48,16 @@ st.markdown("""
         color: white;
         margin-bottom: 2rem;
     }
-    .hero h1 { font-size: 1.8rem; font-weight: 700; margin: 0 0 0.4rem 0; }
-    .hero p  { font-size: 0.95rem; opacity: 0.85; margin: 0; }
+    .hero h1 {
+        font-size: 1.8rem;
+        font-weight: 700;
+        margin: 0 0 0.4rem 0;
+    }
+    .hero p {
+        font-size: 0.95rem;
+        opacity: 0.85;
+        margin: 0;
+    }
 
     .card {
         background: white;
@@ -45,6 +74,7 @@ st.markdown("""
         color: #64748b;
         margin: 0 0 1rem 0;
     }
+
     .result-high {
         background: linear-gradient(135deg, #d1fae5, #a7f3d0);
         border-left: 5px solid #10b981;
@@ -52,7 +82,7 @@ st.markdown("""
         padding: 1.5rem 2rem;
         margin-top: 1rem;
     }
-    .result-medium {
+    .result-average {
         background: linear-gradient(135deg, #fef3c7, #fde68a);
         border-left: 5px solid #f59e0b;
         border-radius: 12px;
@@ -66,8 +96,16 @@ st.markdown("""
         padding: 1.5rem 2rem;
         margin-top: 1rem;
     }
-    .result-label { font-size: 1.6rem; font-weight: 700; margin: 0 0 0.3rem 0; }
-    .result-desc  { font-size: 0.9rem; opacity: 0.8; margin: 0; }
+    .result-label {
+        font-size: 1.6rem;
+        font-weight: 700;
+        margin: 0 0 0.3rem 0;
+    }
+    .result-desc {
+        font-size: 0.9rem;
+        opacity: 0.8;
+        margin: 0;
+    }
 
     div[data-testid="stButton"] button {
         background: linear-gradient(135deg, #1e3a5f, #2563eb);
@@ -87,20 +125,37 @@ st.markdown("""
 # ─────────────────────────────────────────
 @st.cache_resource
 def load_artifacts():
-    with open("model_rf.pkl",      "rb") as f: rf_model  = pickle.load(f)
-    with open("model_svm.pkl",     "rb") as f: svm_model = pickle.load(f)
-    with open("model_knn.pkl",     "rb") as f: knn_model = pickle.load(f)
-    with open("scaler.pkl",        "rb") as f: scaler    = pickle.load(f)
-    with open("imputer.pkl",       "rb") as f: imputer   = pickle.load(f)
-    with open("label_encoder.pkl", "rb") as f: le        = pickle.load(f)
-    return rf_model, svm_model, knn_model, scaler, imputer, le
+    filenames = {
+        "Random Forest": "model_rf.pkl",
+        "SVM": "model_svm.pkl",
+        "KNN": "model_knn.pkl",
+        "scaler": "scaler.pkl",
+        "imputer": "imputer.pkl",
+        "label_encoder": "label_encoder.pkl",
+    }
+
+    loaded = {}
+
+    for key, filename in filenames.items():
+        file_path = BASE_DIR / filename
+
+        if not file_path.exists():
+            raise FileNotFoundError(f"File tidak ditemukan: {filename}")
+
+        with open(file_path, "rb") as f:
+            loaded[key] = pickle.load(f)
+
+    return loaded
+
 
 try:
-    rf_model, svm_model, knn_model, scaler, imputer, label_encoder = load_artifacts()
+    artifacts = load_artifacts()
     model_loaded = True
-except FileNotFoundError as e:
+    load_error = None
+except Exception as e:
+    artifacts = {}
     model_loaded = False
-    missing_file = str(e)
+    load_error = e
 
 # ─────────────────────────────────────────
 # HERO
@@ -108,55 +163,99 @@ except FileNotFoundError as e:
 st.markdown("""
 <div class="hero">
     <h1>🎓 Prediksi Performa Akademik Siswa</h1>
-    <p>Masukkan data kebiasaan belajar dan gaya hidup siswa untuk memprediksi performa akademiknya menggunakan Random Forest, SVM, dan KNN.</p>
+    <p>Masukkan data kebiasaan belajar, kehadiran, gaya hidup, dan aktivitas siswa untuk memprediksi performa akademik.</p>
 </div>
 """, unsafe_allow_html=True)
 
 if not model_loaded:
-    st.error(f"⚠️ File model tidak ditemukan: {missing_file}")
-    st.info("Pastikan semua file .pkl ada di folder yang sama dengan app.py:\nmodel_rf.pkl, model_svm.pkl, model_knn.pkl, scaler.pkl, imputer.pkl, label_encoder.pkl")
+    st.error(f"⚠️ Model gagal dimuat: {load_error}")
+    st.info(
+        "Pastikan semua file .pkl berada di folder yang sama dengan app.py: "
+        "model_rf.pkl, model_svm.pkl, model_knn.pkl, scaler.pkl, imputer.pkl, label_encoder.pkl"
+    )
     st.stop()
 
 # ─────────────────────────────────────────
 # PILIH MODEL
 # ─────────────────────────────────────────
 st.markdown('<div class="card"><h3>⚙️ Pilih Algoritma</h3>', unsafe_allow_html=True)
+
 algoritma = st.radio(
     "Algoritma yang digunakan untuk prediksi:",
     ["Random Forest", "SVM", "KNN"],
     horizontal=True
 )
+
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────
-# FORM INPUT
+# FORM INPUT SESUAI FITUR TRAINING
 # ─────────────────────────────────────────
 st.markdown('<div class="card"><h3>📋 Data Siswa</h3>', unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
+
 with col1:
-    age               = st.number_input("Usia (tahun)", min_value=10, max_value=30, value=17)
-    study_hours       = st.slider("Jam belajar per hari", 0.0, 12.0, 4.0, step=0.5)
-    attendance        = st.slider("Tingkat kehadiran (%)", 0, 100, 80)
-    sleep_hours       = st.slider("Jam tidur per hari", 0.0, 12.0, 7.0, step=0.5)
+    study_hours = st.slider(
+        "Jam belajar per hari",
+        min_value=0.0,
+        max_value=12.0,
+        value=4.0,
+        step=0.5
+    )
+
+    sleep_hours = st.slider(
+        "Jam tidur per hari",
+        min_value=0.0,
+        max_value=12.0,
+        value=7.0,
+        step=0.5
+    )
+
+    attendance = st.slider(
+        "Tingkat kehadiran (%)",
+        min_value=0,
+        max_value=100,
+        value=80
+    )
+
+    screen_time = st.slider(
+        "Screen time per hari (jam)",
+        min_value=0.0,
+        max_value=16.0,
+        value=5.0,
+        step=0.5
+    )
+
+    assignments_on_time = st.slider(
+        "Tugas selesai tepat waktu",
+        min_value=0,
+        max_value=10,
+        value=5
+    )
+
 with col2:
-    physical_activity = st.slider("Aktivitas fisik (jam/minggu)", 0.0, 20.0, 3.0, step=0.5)
-    mental_health     = st.slider("Skor kesehatan mental (1–10)", 1, 10, 7)
-    social_activities = st.slider("Aktivitas sosial (jam/minggu)", 0.0, 20.0, 5.0, step=0.5)
-    gpa               = st.number_input("GPA saat ini", min_value=0.0, max_value=4.0, value=3.0, step=0.01)
+    extracurricular = st.selectbox(
+        "Aktif ekstrakurikuler?",
+        ["No", "Yes"]
+    )
 
-st.markdown("</div>", unsafe_allow_html=True)
-st.markdown('<div class="card"><h3>📌 Data Tambahan</h3>', unsafe_allow_html=True)
+    nutrition_quality = st.selectbox(
+        "Kualitas nutrisi",
+        ["Poor", "Average", "Good"]
+    )
 
-col3, col4 = st.columns(2)
-with col3:
-    gender          = st.selectbox("Jenis kelamin", ["Male", "Female"])
-    part_time_job   = st.selectbox("Punya pekerjaan paruh waktu?", ["Yes", "No"])
-    extracurricular = st.selectbox("Aktif ekstrakurikuler?", ["Yes", "No"])
-with col4:
-    internet_quality = st.selectbox("Kualitas internet", ["Poor", "Average", "Good"])
-    family_income    = st.selectbox("Pendapatan keluarga", ["Low", "Medium", "High"])
-    learning_style   = st.selectbox("Gaya belajar", ["Visual", "Auditory", "Reading/Writing", "Kinesthetic"])
+    stress_level = st.slider(
+        "Tingkat stres (1–10)",
+        min_value=1,
+        max_value=10,
+        value=6
+    )
+
+    digital_tools_usage = st.selectbox(
+        "Penggunaan alat digital belajar",
+        ["Low", "Medium", "High"]
+    )
 
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -165,90 +264,76 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ─────────────────────────────────────────
 if st.button("🔍 Prediksi Sekarang"):
 
-    # Susun input sesuai urutan kolom saat training
-    FEATURES = [
-        "Age", "Study_Hours_Per_Day", "Attendance_Rate",
-        "Sleep_Hours_Per_Day", "Physical_Activity_Hours_Per_Week",
-        "Mental_Health_Score", "Social_Activities_Hours_Per_Week", "GPA",
-        "Gender", "Part_Time_Job", "Extracurricular_Activities",
-        "Internet_Quality", "Family_Income_Level", "Learning_Style"
-    ]
-
-    input_raw = pd.DataFrame([{
-        "Age"                              : age,
-        "Study_Hours_Per_Day"              : study_hours,
-        "Attendance_Rate"                  : attendance,
-        "Sleep_Hours_Per_Day"              : sleep_hours,
-        "Physical_Activity_Hours_Per_Week" : physical_activity,
-        "Mental_Health_Score"              : mental_health,
-        "Social_Activities_Hours_Per_Week" : social_activities,
-        "GPA"                              : gpa,
-        "Gender"                           : gender,
-        "Part_Time_Job"                    : part_time_job,
-        "Extracurricular_Activities"       : extracurricular,
-        "Internet_Quality"                 : internet_quality,
-        "Family_Income_Level"              : family_income,
-        "Learning_Style"                   : learning_style,
-    }])
+    input_data = pd.DataFrame([{
+        "Study_Hours_Per_Day": study_hours,
+        "Sleep_Hours_Per_Day": sleep_hours,
+        "Attendance_Percentage": attendance,
+        "Extracurricular_Activities": EXTRACURRICULAR_MAP[extracurricular],
+        "Screen_Time_Per_Day": screen_time,
+        "Nutrition_Quality": NUTRITION_MAP[nutrition_quality],
+        "Stress_Level": stress_level,
+        "Digital_Tools_Usage": DIGITAL_TOOLS_MAP[digital_tools_usage],
+        "Assignments_On_Time": assignments_on_time,
+    }], columns=FEATURES)
 
     try:
-        # Encode kolom kategorikal (sama seperti saat training)
-        from sklearn.preprocessing import LabelEncoder
-        cat_cols = ["Gender", "Part_Time_Job", "Extracurricular_Activities",
-                    "Internet_Quality", "Family_Income_Level", "Learning_Style"]
-        input_enc = input_raw.copy()
-        for col in cat_cols:
-            le_col = LabelEncoder()
-            le_col.fit(input_enc[col])
-            input_enc[col] = le_col.transform(input_enc[col])
+        imputer = artifacts["imputer"]
+        scaler = artifacts["scaler"]
+        label_encoder = artifacts["label_encoder"]
+        selected_model = artifacts[algoritma]
 
-        # Impute & scale
-        input_imputed = imputer.transform(input_enc[FEATURES])
-        input_scaled  = scaler.transform(input_imputed)
-
-        # Pilih model
-        model_map = {"Random Forest": rf_model, "SVM": svm_model, "KNN": knn_model}
-        selected_model = model_map[algoritma]
+        input_imputed = imputer.transform(input_data)
+        input_scaled = scaler.transform(input_imputed)
 
         pred_encoded = selected_model.predict(input_scaled)
-        pred_label   = label_encoder.inverse_transform(pred_encoded)[0]
+        pred_label = label_encoder.inverse_transform(pred_encoded)[0]
 
         result_config = {
             "High": {
-                "css"  : "result-high",
+                "css": "result-high",
                 "emoji": "🌟",
                 "label": "High — Performa Tinggi",
-                "desc" : "Siswa ini diprediksi memiliki performa akademik yang tinggi. Pertahankan kebiasaan belajar yang baik!"
+                "desc": "Siswa ini diprediksi memiliki performa akademik yang tinggi. Pertahankan kebiasaan belajar yang baik."
             },
-            "Medium": {
-                "css"  : "result-medium",
+            "Average": {
+                "css": "result-average",
                 "emoji": "📈",
-                "label": "Medium — Performa Sedang",
-                "desc" : "Siswa ini diprediksi memiliki performa akademik yang sedang. Masih ada ruang untuk berkembang lebih baik."
+                "label": "Average — Performa Rata-rata",
+                "desc": "Siswa ini diprediksi memiliki performa akademik rata-rata. Masih ada ruang untuk ditingkatkan."
             },
             "Low": {
-                "css"  : "result-low",
+                "css": "result-low",
                 "emoji": "⚠️",
                 "label": "Low — Performa Rendah",
-                "desc" : "Siswa ini diprediksi membutuhkan perhatian lebih. Disarankan untuk meningkatkan jam belajar dan kehadiran."
+                "desc": "Siswa ini diprediksi membutuhkan perhatian lebih, terutama pada kebiasaan belajar, kehadiran, dan penyelesaian tugas."
             },
         }
 
-        cfg = result_config.get(pred_label, {
-            "css": "result-medium", "emoji": "📊",
-            "label": pred_label, "desc": "Prediksi berhasil dilakukan."
+        cfg = result_config.get(str(pred_label), {
+            "css": "result-average",
+            "emoji": "📊",
+            "label": str(pred_label),
+            "desc": "Prediksi berhasil dilakukan."
         })
 
         st.markdown(f"""
         <div class="{cfg['css']}">
             <p class="result-label">{cfg['emoji']} {cfg['label']}</p>
-            <p class="result-desc">Algoritma: <strong>{algoritma}</strong> &nbsp;|&nbsp; {cfg['desc']}</p>
+            <p class="result-desc">
+                Algoritma: <strong>{algoritma}</strong> &nbsp;|&nbsp; {cfg['desc']}
+            </p>
         </div>
         """, unsafe_allow_html=True)
 
+        with st.expander("Lihat data input yang dipakai model"):
+            st.dataframe(input_data)
+
     except Exception as e:
         st.error(f"Terjadi error saat prediksi: {e}")
-        st.info("Pastikan nama kolom sesuai dengan kolom saat training. Jalankan print(X.columns.tolist()) di Colab untuk cek.")
+        st.info(
+            "Cek kembali apakah file model, scaler, imputer, dan label_encoder "
+            "dibuat dari dataset serta urutan fitur yang sama."
+        )
 
 # ─────────────────────────────────────────
 # FOOTER
